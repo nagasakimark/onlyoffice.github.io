@@ -1,42 +1,22 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>NH Fonts Plugin</title>
+<meta charset="UTF‑8">
 
-<!-- ONLYOFFICE plugin core libs (required) -->
+<!-- ONLYOFFICE plugin engine (must load first) -->
 <script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.js"></script>
 <script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins-ui.js"></script>
 <link rel="stylesheet" href="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.css">
 
 <style>
-@font-face {
-  font-family: NH1;
-  src: url("https://nagasakimark.github.io/office/1.ttf");
-}
-@font-face {
-  font-family: NH2;
-  src: url("https://nagasakimark.github.io/office/2.ttf");
-}
-@font-face {
-  font-family: NH3;
-  src: url("https://nagasakimark.github.io/office/3.ttf");
-}
-
-body {
-  font-family: sans-serif;
-  margin: 10px;
-}
-textarea { width: 100%; height: 100px; font-size: 20px; }
-.preview { border: 1px solid #ccc; padding: 10px; margin-top: 10px; min-height: 50px; }
-select, button { margin-top: 10px; width: 100%; }
+/* optional UI styles */
+body { font-family: sans-serif; padding: 8px; }
+textarea { width: 100%; height: 80px; }
 </style>
-
 </head>
 <body>
 
 <h3>NH Fonts Plugin</h3>
-
 <textarea id="text">Write here...</textarea>
 
 <select id="font">
@@ -45,48 +25,28 @@ select, button { margin-top: 10px; width: 100%; }
   <option value="NH3">NHHandwriting RL TW Light</option>
 </select>
 
-<div class="preview" id="preview"></div>
-
-<button onclick="insert()">Insert into document</button>
+<button onclick="insert()">Insert</button>
 
 <script>
-const textEl = document.getElementById("text");
-const fontEl = document.getElementById("font");
-const preview = document.getElementById("preview");
-
-function updatePreview() {
-  preview.style.fontFamily = fontEl.value;
-  preview.innerText = textEl.value;
-}
-textEl.oninput = updatePreview;
-fontEl.onchange = updatePreview;
-updatePreview();
-
-function makeSVG(text, font) {
-  const file =
-    font === "NH1" ? "1.ttf" :
-    font === "NH2" ? "2.ttf" : 
-    font === "NH3" ? "3.ttf";
-
-  return `
+function insert() {
+  const text = document.getElementById("text").value;
+  const font = document.getElementById("font").value;
+  const svg = `
 <svg xmlns="http://www.w3.org/2000/svg">
   <style>
     @font-face {
       font-family: ${font};
-      src: url("https://nagasakimark.github.io/office/${file}");
+      src: url("https://nagasakimark.github.io/office/${font==="NH1"?"1.ttf":font==="NH2"?"2.ttf":"3.ttf"}");
     }
     text { font-family: ${font}; font-size: 24px; }
   </style>
   <text x="10" y="40">${text}</text>
 </svg>`;
-}
-
-function insert() {
-  const svg = makeSVG(textEl.value, fontEl.value);
   window.Asc.plugin.executeMethod("PasteHtml", [svg]);
 }
 </script>
 
+<!-- your plugin logic -->
 <script src="pluginCode.js"></script>
 
 </body>
