@@ -1,0 +1,16 @@
+{
+  "name": "NHFonts",
+  "guid": "asc.{B1234567-89AB-4CDE-F012-3456789ABCDE}",
+  "baseUrl": "",
+  "version": "1.0.0",
+  "offered": "Mark",
+  "variations": [
+    {
+      "description": "NH Fonts",
+      "url": "index.html",
+      "icons": [],
+      "isViewer": false,
+      "EditorsSupport": ["word"]
+    }
+  ]
+}
