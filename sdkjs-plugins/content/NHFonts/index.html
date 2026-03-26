@@ -6,10 +6,14 @@
 <script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins-ui.js"></script>
 <link rel="stylesheet" href="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.css">
 <style>
-body { font-family: sans-serif; padding: 8px; }
-textarea { width: 100%; height: 80px; box-sizing: border-box; }
-select { width: 100%; margin: 6px 0; }
-button { margin-top: 6px; }
+* { box-sizing: border-box; }
+html, body { width: 100%; min-height: 100px; margin: 0; padding: 0; }
+body { font-family: sans-serif; padding: 10px; background: #fff; }
+h3 { margin: 0 0 8px 0; font-size: 14px; }
+textarea { width: 100%; height: 80px; margin-bottom: 6px; padding: 4px; }
+select { width: 100%; margin-bottom: 6px; padding: 4px; }
+button { width: 100%; padding: 6px; cursor: pointer; }
+#status { margin-top: 6px; font-size: 12px; color: #666; }
 </style>
 </head>
 <body>
@@ -21,23 +25,84 @@ button { margin-top: 6px; }
   <option value="NH3">NHHandwriting RL TW Light</option>
 </select>
 <button onclick="insert()">Insert</button>
+<div id="status"></div>
+
+<script src="pluginCode.js"></script>
 
 <script>
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
 function insert() {
   var text = document.getElementById("text").value;
   var font = document.getElementById("font").value;
   var fontFile = font === "NH1" ? "1.ttf" : font === "NH2" ? "2.ttf" : "3.ttf";
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="60">'
-    + '<style>'
-    + '@font-face { font-family: "' + font + '"; src: url("https://nagasakimark.github.io/office/' + fontFile + '"); }'
-    + 'text { font-family: "' + font + '"; font-size: 24px; }'
-    + '</style>'
-    + '<text x="10" y="40">' + text + '</text>'
-    + '</svg>';
-  window.Asc.plugin.executeMethod("PasteHtml", [svg]);
+  var fontUrl = "https://nagasakimark.github.io/office/" + fontFile;
+
+  setStatus("Loading font...");
+
+  // We render the SVG onto a canvas so the font is fully embedded as a PNG image,
+  // which ONLYOFFICE can reliably insert via InsertImage.
+  loadFontAndRender(text, font, fontUrl, function(dataUrl, widthPx, heightPx) {
+    setStatus("Inserting...");
+
+    // InsertImage expects: url, width in mm, height in mm
+    // 1px ~ 0.2646mm at 96dpi
+    var mmW = Math.round(widthPx * 0.2646 * 10) / 10;
+    var mmH = Math.round(heightPx * 0.2646 * 10) / 10;
+
+    window.Asc.plugin.executeMethod("InsertImage", [{
+      "src": dataUrl,
+      "width": mmW,
+      "height": mmH
+    }], function() {
+      setStatus("Done.");
+    });
+  });
+}
+
+function loadFontAndRender(text, fontName, fontUrl, callback) {
+  var fontSize = 32;
+  var padding = 10;
+
+  // Load the font via FontFace API so canvas can use it
+  var face = new FontFace(fontName, "url(" + fontUrl + ")");
+  face.load().then(function(loadedFace) {
+    document.fonts.add(loadedFace);
+
+    // Measure text width with a temporary canvas
+    var tempCanvas = document.createElement("canvas");
+    var tempCtx = tempCanvas.getContext("2d");
+    tempCtx.font = fontSize + "px \"" + fontName + "\"";
+    var textWidth = tempCtx.measureText(text).width;
+
+    var canvasWidth = Math.ceil(textWidth) + padding * 2;
+    var canvasHeight = fontSize + padding * 2;
+
+    var canvas = document.createElement("canvas");
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    var ctx = canvas.getContext("2d");
+
+    // White background
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    // Draw text
+    ctx.fillStyle = "#000000";
+    ctx.font = fontSize + "px \"" + fontName + "\"";
+    ctx.textBaseline = "top";
+    ctx.fillText(text, padding, padding);
+
+    var dataUrl = canvas.toDataURL("image/png");
+    callback(dataUrl, canvasWidth, canvasHeight);
+
+  }).catch(function(err) {
+    setStatus("Font load failed: " + err.message);
+    console.error("Font load error:", err);
+  });
 }
 </script>
-
-<script src="pluginCode.js"></script>
 </body>
 </html>
