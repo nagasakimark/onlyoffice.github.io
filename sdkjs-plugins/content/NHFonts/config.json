@@ -8,7 +8,7 @@
     {
       "description": "NH Fonts",
       "url": "index.html",
-      "icons": ["resources/img/icon.png", "resources/img/icon@2x.png"],
+      "icons": [],
       "isViewer": false,
       "EditorsSupport": ["word"],
       "initDataType": "none",
