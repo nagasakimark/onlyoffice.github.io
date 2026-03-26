@@ -62,22 +62,19 @@ function fetchFont(url) {
  * sharp even when scaled up moderately in the document.
  */
 function renderToPng(text, fontFamily, fontBuf, fontSize) {
-  var SCALE = 3; // pixel density multiplier
+  var SCALE = 3;
 
   return new Promise(function(resolve, reject) {
-    // 1. Register font in the plugin window so canvas can use it.
     var face = new FontFace(fontFamily, fontBuf);
     face.load().then(function(loadedFace) {
       document.fonts.add(loadedFace);
 
-      // 2. Layout at physical (scaled-up) size.
       var physicalFontSize = fontSize * SCALE;
       var lineHeight = Math.round(physicalFontSize * 1.4);
       var paddingX   = Math.round(physicalFontSize * 0.3);
       var paddingY   = Math.round(physicalFontSize * 0.3);
       var lines      = text.split('\n');
 
-      // Measure on a temp canvas at physical size.
       var tmp = document.createElement('canvas');
       var tmpCtx = tmp.getContext('2d');
       tmpCtx.font = physicalFontSize + 'px "' + fontFamily + '"';
@@ -91,11 +88,9 @@ function renderToPng(text, fontFamily, fontBuf, fontSize) {
       var physicalW = Math.ceil(maxW)           + paddingX * 2;
       var physicalH = lines.length * lineHeight + paddingY * 2;
 
-      // Logical (display) dimensions passed to OnlyOffice.
       var logicalW = Math.round(physicalW / SCALE);
       var logicalH = Math.round(physicalH / SCALE);
 
-      // 3. Draw at physical size.
       var canvas = document.createElement('canvas');
       canvas.width  = physicalW;
       canvas.height = physicalH;
@@ -130,8 +125,6 @@ function insert() {
 
   var fileMap = { NH1: '1.ttf', NH2: '2.ttf', NH3: '3.ttf' };
   var fontUrl = 'https://nagasakimark.github.io/office/' + fileMap[fontKey];
-
-  // Unique family name per font key to avoid cross-font cache collisions.
   var fontFamily = fontKey + '_nhplugin';
 
   setStatus('Loading font...');
@@ -144,23 +137,40 @@ function insert() {
     .then(function(result) {
       setStatus('Inserting...');
 
-      // EMU = logical pixels x 9525  (1 px = 9525 EMU at 96 dpi)
+      // EMU = logical pixels x 9525
       var emuW = Math.round(result.width  * 9525);
       var emuH = Math.round(result.height * 9525);
 
-      Asc.scope.imgSrc = result.dataUrl;
-      Asc.scope.emuW   = emuW;
-      Asc.scope.emuH   = emuH;
+      Asc.scope.imgSrc    = result.dataUrl;
+      Asc.scope.emuW      = emuW;
+      Asc.scope.emuH      = emuH;
+      Asc.scope.editorType = window.Asc.plugin.info.editorType;
 
-      // callCommand(func, isClose, isCalc, callback)
-      // isClose = false -> keep panel open
-      // isCalc  = true  -> recalculate document after insert (required for images)
       window.Asc.plugin.callCommand(function() {
-        var oDocument  = Api.GetDocument();
-        var oParagraph = Api.CreateParagraph();
-        var oImage     = Api.CreateImage(Asc.scope.imgSrc, Asc.scope.emuW, Asc.scope.emuH);
-        oParagraph.AddDrawing(oImage);
-        oDocument.InsertContent([oParagraph]);
+        var imgSrc = Asc.scope.imgSrc;
+        var emuW   = Asc.scope.emuW;
+        var emuH   = Asc.scope.emuH;
+        var editor = Asc.scope.editorType; // "word" | "slide" | "cell" | "pdf"
+
+        var oImage = Api.CreateImage(imgSrc, emuW, emuH);
+
+        if (editor === 'slide') {
+          // Presentation: add as a floating object directly on the current slide.
+          // Position it at a sensible default (top-left with a small margin).
+          var oPresentation = Api.GetPresentation();
+          var nSlide = oPresentation.GetCurSlideIndex();
+          var oSlide = oPresentation.GetSlideByIndex(nSlide);
+          oImage.SetPosition(36000 * 10, 36000 * 10); // ~10mm from top-left
+          oImage.SetSize(emuW, emuH);
+          oSlide.AddObject(oImage);
+        } else {
+          // Word (and fallback for other text-based editors):
+          // insert inline inside a paragraph.
+          var oDocument  = Api.GetDocument();
+          var oParagraph = Api.CreateParagraph();
+          oParagraph.AddDrawing(oImage);
+          oDocument.InsertContent([oParagraph]);
+        }
       }, false, true, function(err) {
         if (err) {
           console.error('[NHFonts] callCommand error:', err);
