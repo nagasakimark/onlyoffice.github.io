@@ -26,7 +26,6 @@ label { font-size: 12px; display: block; margin-bottom: 2px; }
 .row .field label { font-size: 12px; margin-bottom: 2px; }
 .row .field input[type=number] { width: 100%; padding: 4px; }
 
-/* Color swatch + hidden native picker */
 .color-wrap {
   position: relative;
   width: 36px;
@@ -94,17 +93,6 @@ function fetchFont(url) {
     });
 }
 
-// Hex color (#rrggbb) to {r,g,b} 0-255
-function hexToRgb(hex) {
-  var n = parseInt(hex.slice(1), 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-
-// Perceived lightness (0-255) — used to decide background fill
-function luminance(rgb) {
-  return 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-}
-
 // ---------- core: render text to PNG via canvas ----------
 
 function renderToPng(text, fontFamily, fontBuf, fontSize, textColor) {
@@ -142,10 +130,8 @@ function renderToPng(text, fontFamily, fontBuf, fontSize, textColor) {
       canvas.height = physicalH;
       var ctx = canvas.getContext('2d');
 
-      // White background always — keeps the image opaque for OnlyOffice.
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, physicalW, physicalH);
-
+      // Fully transparent background — canvas is already transparent by default,
+      // so we just skip any fillRect and draw text directly.
       ctx.font         = physicalFontSize + 'px "' + fontFamily + '"';
       ctx.fillStyle    = textColor;
       ctx.textBaseline = 'alphabetic';
@@ -169,7 +155,7 @@ function insert() {
   var text      = document.getElementById('text').value;
   var fontKey   = document.getElementById('font').value;
   var fontSize  = parseInt(document.getElementById('fontSize').value, 10) || 40;
-  var textColor = document.getElementById('textColor').value; // e.g. "#e63946"
+  var textColor = document.getElementById('textColor').value;
 
   var fileMap = { NH1: '1.ttf', NH2: '2.ttf', NH3: '3.ttf' };
   var fontUrl    = 'https://nagasakimark.github.io/office/' + fileMap[fontKey];
