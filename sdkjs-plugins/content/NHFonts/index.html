@@ -30,11 +30,12 @@ button { width: 100%; padding: 6px; cursor: pointer; }
 <canvas id="measureCanvas" style="display:none;"></canvas>
 
 <script>
-// Cache fetched font base64 so we don't re-download on every insert
+// Cache fetched font base64
 var fontCache = {};
 
 function setStatus(msg) {
   document.getElementById("status").textContent = msg;
+  console.log("[Status]", msg);
 }
 
 function arrayBufferToBase64(buffer) {
@@ -62,10 +63,9 @@ function getFontBase64(fontUrl) {
     });
 }
 
-function measureTextWidth(text, fontName, fontSize) {
+function measureTextWidth(text, fontSize) {
   var canvas = document.getElementById("measureCanvas");
   var ctx = canvas.getContext("2d");
-  // Use a fallback font that's close to the final one – but we only need a rough estimate
   ctx.font = fontSize + "px 'Times New Roman', serif";
   return ctx.measureText(text).width;
 }
@@ -83,27 +83,23 @@ function insert() {
 
     var fontSize = 40;
     var lineHeight = fontSize * 1.3;
-    var paddingX = 12;   // slightly more padding to avoid clipping
+    var paddingX = 12;
     var paddingY = 12;
 
-    // Split text into lines
     var lines = text.split("\n");
     var numLines = lines.length;
 
-    // Estimate max width using a fallback font (Times New Roman)
     var maxWidth = 0;
     lines.forEach(function(line) {
-      var w = measureTextWidth(line, font, fontSize);
+      var w = measureTextWidth(line, fontSize);
       if (w > maxWidth) maxWidth = w;
     });
-    // Add extra margin for safety
     var svgWidth  = Math.ceil(maxWidth) + paddingX * 2 + 40;
     var svgHeight = Math.ceil(numLines * lineHeight) + paddingY * 2;
 
-    // Build <text> elements, one per line
+    // Build text elements
     var textElements = lines.map(function(line, i) {
       var y = paddingY + fontSize + i * lineHeight;
-      // Escape XML special characters
       var safe = line
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -112,11 +108,12 @@ function insert() {
       return '<text x="' + paddingX + '" y="' + y + '">' + safe + '</text>';
     }).join("\n  ");
 
-    // ---- FIX: <style> moved outside <defs> ----
+    // SVG with style outside <defs> and a background rectangle (for debugging)
     var svg = [
       '<svg xmlns="http://www.w3.org/2000/svg"',
       '     width="' + svgWidth + '" height="' + svgHeight + '"',
       '     viewBox="0 0 ' + svgWidth + ' ' + svgHeight + '">',
+      '  <rect width="100%" height="100%" fill="#f0f0f0"/>',  // light gray background – remove later
       '  <style>',
       '    @font-face {',
       '      font-family: "' + font + '";',
@@ -132,31 +129,37 @@ function insert() {
       '</svg>'
     ].join("\n");
 
-    // Encode entire SVG as a base64 data URI
-    var svgB64 = btoa(unescape(encodeURIComponent(svg)));
-    var svgDataUrl = "data:image/svg+xml;base64," + svgB64;
+    // Encode SVG to data URL (safe method)
+    var svgBase64 = btoa(unescape(encodeURIComponent(svg)));
+    var svgDataUrl = "data:image/svg+xml;base64," + svgBase64;
 
-    // Convert px to EMU (1px at 96dpi = 9525 EMU)
+    // Debug: log SVG and open in new window (optional)
+    console.log("SVG Data URL length:", svgDataUrl.length);
+    // window.open(svgDataUrl); // uncomment to test in browser
+
     var emuW = Math.round(svgWidth  * 9525);
     var emuH = Math.round(svgHeight * 9525);
 
-    setStatus("Inserting...");
+    setStatus("Inserting image...");
+    console.log("Inserting with dimensions:", svgWidth, svgHeight, emuW, emuH);
 
     Asc.scope.imgSrc = svgDataUrl;
     Asc.scope.emuW   = emuW;
     Asc.scope.emuH   = emuH;
 
     window.Asc.plugin.callCommand(function() {
-      var oDocument = Api.GetDocument();
-      var oImage = Api.CreateImage(Asc.scope.imgSrc, Asc.scope.emuW, Asc.scope.emuH);
-
-      // Set wrapping to "infront" so it floats over text without affecting layout
-      oImage.SetWrappingStyle("infront");
-
-      // Insert at cursor position
-      var oParagraph = Api.CreateParagraph();
-      oParagraph.AddDrawing(oImage);
-      oDocument.InsertContent([oParagraph]);
+      try {
+        var oDocument = Api.GetDocument();
+        var oImage = Api.CreateImage(Asc.scope.imgSrc, Asc.scope.emuW, Asc.scope.emuH);
+        oImage.SetWrappingStyle("infront");
+        var oParagraph = Api.CreateParagraph();
+        oParagraph.AddDrawing(oImage);
+        oDocument.InsertContent([oParagraph]);
+        console.log("Image inserted successfully");
+      } catch (e) {
+        console.error("Insert error:", e);
+        setStatus("Insert error: " + e.message);
+      }
     }, false, false, function(err) {
       if (err) {
         console.error("callCommand error:", err);
