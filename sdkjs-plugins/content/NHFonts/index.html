@@ -11,168 +11,176 @@ html, body { width: 100%; min-height: 100px; margin: 0; padding: 0; }
 body { font-family: sans-serif; padding: 10px; background: #fff; }
 h3 { margin: 0 0 8px 0; font-size: 14px; }
 textarea { width: 100%; height: 80px; margin-bottom: 6px; padding: 4px; }
-select { width: 100%; margin-bottom: 6px; padding: 4px; }
+select, input[type=number] { width: 100%; margin-bottom: 6px; padding: 4px; }
 button { width: 100%; padding: 6px; cursor: pointer; }
 #status { margin-top: 6px; font-size: 12px; color: #666; }
+label { font-size: 12px; display: block; margin-bottom: 2px; }
 </style>
 </head>
 <body>
 <h3>NH Fonts Plugin</h3>
 <textarea id="text">Write here...</textarea>
+<label>Font</label>
 <select id="font">
   <option value="NH1">NHHandwriting</option>
   <option value="NH2">NHHandwriting RL</option>
   <option value="NH3">NHHandwriting RL TW Light</option>
 </select>
+<label>Font size (px)</label>
+<input type="number" id="fontSize" value="40" min="8" max="200">
 <button onclick="insert()">Insert</button>
 <div id="status"></div>
 
-<canvas id="measureCanvas" style="display:none;"></canvas>
-
 <script>
-// Cache fetched font base64
-var fontCache = {};
+// ---------- helpers ----------
+
+var fontCache = {}; // url -> ArrayBuffer
 
 function setStatus(msg) {
-  document.getElementById("status").textContent = msg;
-  console.log("[Status]", msg);
+  document.getElementById('status').textContent = msg;
+  console.log('[NHFonts]', msg);
 }
 
-function arrayBufferToBase64(buffer) {
-  var binary = "";
-  var bytes = new Uint8Array(buffer);
-  for (var i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+function fetchFont(url) {
+  if (fontCache[url]) return Promise.resolve(fontCache[url]);
+  return fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error('Font fetch failed: ' + r.status);
+      return r.arrayBuffer();
+    })
+    .then(function(buf) {
+      fontCache[url] = buf;
+      return buf;
+    });
+}
+
+function arrayBufferToBase64(buf) {
+  var bytes = new Uint8Array(buf);
+  var binary = '';
+  for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
-function getFontBase64(fontUrl) {
-  if (fontCache[fontUrl]) {
-    return Promise.resolve(fontCache[fontUrl]);
-  }
-  return fetch(fontUrl)
-    .then(function(res) {
-      if (!res.ok) throw new Error("Font fetch failed: " + res.status);
-      return res.arrayBuffer();
-    })
-    .then(function(buffer) {
-      var b64 = arrayBufferToBase64(buffer);
-      fontCache[fontUrl] = b64;
-      return b64;
-    });
+// ---------- core: render text to PNG via canvas ----------
+
+/**
+ * Loads the TTF into the plugin window via FontFace API,
+ * draws each line onto a canvas, and returns a PNG data URL.
+ */
+function renderToPng(text, fontFamily, fontBuf, fontSize) {
+  return new Promise(function(resolve, reject) {
+    // 1. Register the font in the plugin window so canvas can use it.
+    var face = new FontFace(fontFamily, fontBuf);
+    face.load().then(function(loadedFace) {
+      document.fonts.add(loadedFace);
+
+      // 2. Measure and layout.
+      var lineHeight = Math.round(fontSize * 1.4);
+      var paddingX   = Math.round(fontSize * 0.3);
+      var paddingY   = Math.round(fontSize * 0.3);
+      var lines      = text.split('\n');
+
+      // Measure on a temp canvas.
+      var tmp = document.createElement('canvas');
+      var tmpCtx = tmp.getContext('2d');
+      tmpCtx.font = fontSize + 'px "' + fontFamily + '"';
+
+      var maxW = 0;
+      lines.forEach(function(line) {
+        var w = tmpCtx.measureText(line || ' ').width;
+        if (w > maxW) maxW = w;
+      });
+
+      var canvasW = Math.ceil(maxW)       + paddingX * 2;
+      var canvasH = lines.length * lineHeight + paddingY * 2;
+
+      // 3. Draw on real canvas.
+      var canvas = document.createElement('canvas');
+      canvas.width  = canvasW;
+      canvas.height = canvasH;
+      var ctx = canvas.getContext('2d');
+
+      // White background (avoids transparency artefacts in some renderers).
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+
+      // Text.
+      ctx.font      = fontSize + 'px "' + fontFamily + '"';
+      ctx.fillStyle = '#000000';
+      ctx.textBaseline = 'alphabetic';
+
+      lines.forEach(function(line, i) {
+        var x = paddingX;
+        var y = paddingY + fontSize + i * lineHeight;
+        ctx.fillText(line, x, y);
+      });
+
+      resolve({
+        dataUrl: canvas.toDataURL('image/png'),
+        width:   canvasW,
+        height:  canvasH
+      });
+    }).catch(reject);
+  });
 }
 
-function measureTextWidth(text, fontSize) {
-  var canvas = document.getElementById("measureCanvas");
-  var ctx = canvas.getContext("2d");
-  ctx.font = fontSize + "px 'Times New Roman', serif";
-  return ctx.measureText(text).width;
-}
+// ---------- insert ----------
 
 function insert() {
-  var text = document.getElementById("text").value;
-  var font = document.getElementById("font").value;
-  var fontFile = font === "NH1" ? "1.ttf" : font === "NH2" ? "2.ttf" : "3.ttf";
-  var fontUrl = "https://nagasakimark.github.io/office/" + fontFile;
+  var text     = document.getElementById('text').value;
+  var fontKey  = document.getElementById('font').value;
+  var fontSize = parseInt(document.getElementById('fontSize').value, 10) || 40;
 
-  setStatus("Loading font...");
+  var fileMap = { NH1: '1.ttf', NH2: '2.ttf', NH3: '3.ttf' };
+  var fontUrl = 'https://nagasakimark.github.io/office/' + fileMap[fontKey];
 
-  getFontBase64(fontUrl).then(function(fontB64) {
-    setStatus("Building SVG...");
+  // Use the font-key as the CSS family name so multiple fonts don't clash.
+  var fontFamily = fontKey + '_nhplugin';
 
-    var fontSize = 40;
-    var lineHeight = fontSize * 1.3;
-    var paddingX = 12;
-    var paddingY = 12;
+  setStatus('Loading font…');
 
-    var lines = text.split("\n");
-    var numLines = lines.length;
+  fetchFont(fontUrl)
+    .then(function(fontBuf) {
+      setStatus('Rendering text…');
+      return renderToPng(text, fontFamily, fontBuf, fontSize);
+    })
+    .then(function(result) {
+      setStatus('Inserting…');
 
-    var maxWidth = 0;
-    lines.forEach(function(line) {
-      var w = measureTextWidth(line, fontSize);
-      if (w > maxWidth) maxWidth = w;
-    });
-    var svgWidth  = Math.ceil(maxWidth) + paddingX * 2 + 40;
-    var svgHeight = Math.ceil(numLines * lineHeight) + paddingY * 2;
+      // EMU = pixels × 9525  (1 px = 9525 EMU at 96 dpi)
+      var emuW = Math.round(result.width  * 9525);
+      var emuH = Math.round(result.height * 9525);
 
-    // Build text elements
-    var textElements = lines.map(function(line, i) {
-      var y = paddingY + fontSize + i * lineHeight;
-      var safe = line
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-      return '<text x="' + paddingX + '" y="' + y + '">' + safe + '</text>';
-    }).join("\n  ");
+      Asc.scope.imgSrc = result.dataUrl;
+      Asc.scope.emuW   = emuW;
+      Asc.scope.emuH   = emuH;
 
-    // SVG with style outside <defs> and a background rectangle (for debugging)
-    var svg = [
-      '<svg xmlns="http://www.w3.org/2000/svg"',
-      '     width="' + svgWidth + '" height="' + svgHeight + '"',
-      '     viewBox="0 0 ' + svgWidth + ' ' + svgHeight + '">',
-      '  <rect width="100%" height="100%" fill="#f0f0f0"/>',  // light gray background – remove later
-      '  <style>',
-      '    @font-face {',
-      '      font-family: "' + font + '";',
-      '      src: url("data:font/truetype;base64,' + fontB64 + '");',
-      '    }',
-      '    text {',
-      '      font-family: "' + font + '", "Times New Roman", serif;',
-      '      font-size: ' + fontSize + 'px;',
-      '      fill: #000000;',
-      '    }',
-      '  </style>',
-      '  ' + textElements,
-      '</svg>'
-    ].join("\n");
-
-    // Encode SVG to data URL (safe method)
-    var svgBase64 = btoa(unescape(encodeURIComponent(svg)));
-    var svgDataUrl = "data:image/svg+xml;base64," + svgBase64;
-
-    // Debug: log SVG and open in new window (optional)
-    console.log("SVG Data URL length:", svgDataUrl.length);
-    // window.open(svgDataUrl); // uncomment to test in browser
-
-    var emuW = Math.round(svgWidth  * 9525);
-    var emuH = Math.round(svgHeight * 9525);
-
-    setStatus("Inserting image...");
-    console.log("Inserting with dimensions:", svgWidth, svgHeight, emuW, emuH);
-
-    Asc.scope.imgSrc = svgDataUrl;
-    Asc.scope.emuW   = emuW;
-    Asc.scope.emuH   = emuH;
-
-    window.Asc.plugin.callCommand(function() {
-      try {
-        var oDocument = Api.GetDocument();
-        var oImage = Api.CreateImage(Asc.scope.imgSrc, Asc.scope.emuW, Asc.scope.emuH);
-        oImage.SetWrappingStyle("infront");
+      // callCommand(func, isClose, isCalc, callback)
+      // isClose = false  → keep panel open
+      // isCalc  = true   → recalculate document after insert (required for images)
+      window.Asc.plugin.callCommand(function() {
+        var oDocument  = Api.GetDocument();
         var oParagraph = Api.CreateParagraph();
+
+        // CreateImage(src, widthEMU, heightEMU)
+        var oImage = Api.CreateImage(Asc.scope.imgSrc, Asc.scope.emuW, Asc.scope.emuH);
+
+        // AddDrawing inserts inline (no wrapping call needed – inline always works in cloud).
         oParagraph.AddDrawing(oImage);
         oDocument.InsertContent([oParagraph]);
-        console.log("Image inserted successfully");
-      } catch (e) {
-        console.error("Insert error:", e);
-        setStatus("Insert error: " + e.message);
-      }
-    }, false, false, function(err) {
-      if (err) {
-        console.error("callCommand error:", err);
-        setStatus("Error: " + JSON.stringify(err));
-      } else {
-        setStatus("Done.");
-      }
+      }, false, true, function(err) {
+        if (err) {
+          console.error('[NHFonts] callCommand error:', err);
+          setStatus('Error: ' + JSON.stringify(err));
+        } else {
+          setStatus('Done.');
+        }
+      });
+    })
+    .catch(function(err) {
+      console.error('[NHFonts]', err);
+      setStatus('Failed: ' + err.message);
     });
-
-  }).catch(function(err) {
-    setStatus("Failed: " + err.message);
-    console.error(err);
-  });
 }
 </script>
 </body>
