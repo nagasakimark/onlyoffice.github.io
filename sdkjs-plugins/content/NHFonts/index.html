@@ -27,13 +27,49 @@ button { width: 100%; padding: 6px; cursor: pointer; }
 <button onclick="insert()">Insert</button>
 <div id="status"></div>
 
-<canvas id="renderCanvas" style="display:none;"></canvas>
+<canvas id="measureCanvas" style="display:none;"></canvas>
 
 <script src="pluginCode.js"></script>
 
 <script>
+// Cache fetched font base64 so we don't re-download on every insert
+var fontCache = {};
+
 function setStatus(msg) {
   document.getElementById("status").textContent = msg;
+}
+
+function arrayBufferToBase64(buffer) {
+  var binary = "";
+  var bytes = new Uint8Array(buffer);
+  for (var i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function getFontBase64(fontUrl) {
+  if (fontCache[fontUrl]) {
+    return Promise.resolve(fontCache[fontUrl]);
+  }
+  return fetch(fontUrl)
+    .then(function(res) {
+      if (!res.ok) throw new Error("Font fetch failed: " + res.status);
+      return res.arrayBuffer();
+    })
+    .then(function(buffer) {
+      var b64 = arrayBufferToBase64(buffer);
+      fontCache[fontUrl] = b64;
+      return b64;
+    });
+}
+
+function measureTextWidth(text, fontName, fontSize) {
+  var canvas = document.getElementById("measureCanvas");
+  var ctx = canvas.getContext("2d");
+  // Use a fallback font for measurement — close enough for sizing
+  ctx.font = fontSize + "px serif";
+  return ctx.measureText(text).width;
 }
 
 function insert() {
@@ -44,53 +80,86 @@ function insert() {
 
   setStatus("Loading font...");
 
-  var face = new FontFace(font, "url(" + fontUrl + ")");
-  face.load().then(function(loadedFace) {
-    document.fonts.add(loadedFace);
-    setStatus("Rendering...");
+  getFontBase64(fontUrl).then(function(fontB64) {
+    setStatus("Building SVG...");
 
-    var fontSize = 32;
-    var padding = 10;
+    var fontSize = 40;
+    var lineHeight = fontSize * 1.3;
+    var paddingX = 6;
+    var paddingY = 6;
 
-    // Measure text width
-    var temp = document.createElement("canvas");
-    var tempCtx = temp.getContext("2d");
-    tempCtx.font = fontSize + "px \"" + font + "\"";
-    var textWidth = tempCtx.measureText(text).width;
+    // Split text into lines
+    var lines = text.split("\n");
+    var numLines = lines.length;
 
-    var canvasW = Math.ceil(textWidth) + padding * 2;
-    var canvasH = fontSize + padding * 2;
+    // Rough width estimate using canvas with fallback font
+    var maxWidth = 0;
+    lines.forEach(function(line) {
+      var w = measureTextWidth(line, font, fontSize);
+      if (w > maxWidth) maxWidth = w;
+    });
+    // Add generous padding since our measurement uses a fallback font
+    var svgWidth  = Math.ceil(maxWidth) + paddingX * 2 + 40;
+    var svgHeight = Math.ceil(numLines * lineHeight) + paddingY * 2;
 
-    var canvas = document.getElementById("renderCanvas");
-    canvas.width  = canvasW;
-    canvas.height = canvasH;
-    var ctx = canvas.getContext("2d");
+    // Build <text> elements, one per line
+    var textElements = lines.map(function(line, i) {
+      var y = paddingY + fontSize + i * lineHeight;
+      // Escape XML special characters
+      var safe = line
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+      return '<text x="' + paddingX + '" y="' + y + '">' + safe + '</text>';
+    }).join("\n  ");
 
-    ctx.clearRect(0, 0, canvasW, canvasH);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasW, canvasH);
-    ctx.fillStyle = "#000000";
-    ctx.font = fontSize + "px \"" + font + "\"";
-    ctx.textBaseline = "top";
-    ctx.fillText(text, padding, padding);
+    var svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg"',
+      '     width="' + svgWidth + '" height="' + svgHeight + '"',
+      '     viewBox="0 0 ' + svgWidth + ' ' + svgHeight + '">',
+      '  <defs>',
+      '    <style>',
+      '      @font-face {',
+      '        font-family: "' + font + '";',
+      '        src: url("data:font/truetype;base64,' + fontB64 + '");',
+      '      }',
+      '      text {',
+      '        font-family: "' + font + '", serif;',
+      '        font-size: ' + fontSize + 'px;',
+      '        fill: #000000;',
+      '      }',
+      '    </style>',
+      '  </defs>',
+      '  ' + textElements,
+      '</svg>'
+    ].join("\n");
 
-    var dataUrl = canvas.toDataURL("image/png");
+    // Encode entire SVG as a base64 data URI
+    var svgB64 = btoa(unescape(encodeURIComponent(svg)));
+    var svgDataUrl = "data:image/svg+xml;base64," + svgB64;
 
-    // Convert px to EMU: 1px at 96dpi = 9525 EMU
-    var emuW = Math.round(canvasW * 9525);
-    var emuH = Math.round(canvasH * 9525);
+    // Convert px to EMU (1px at 96dpi = 9525 EMU)
+    var emuW = Math.round(svgWidth  * 9525);
+    var emuH = Math.round(svgHeight * 9525);
 
     setStatus("Inserting...");
 
-    // Pass data to callCommand via Asc.scope
-    Asc.scope.imgSrc = dataUrl;
+    Asc.scope.imgSrc = svgDataUrl;
     Asc.scope.emuW   = emuW;
     Asc.scope.emuH   = emuH;
 
     window.Asc.plugin.callCommand(function() {
       var oDocument = Api.GetDocument();
-      var oParagraph = Api.CreateParagraph();
       var oImage = Api.CreateImage(Asc.scope.imgSrc, Asc.scope.emuW, Asc.scope.emuH);
+
+      // Set wrapping to "infront" so it floats over text without affecting layout
+      oImage.SetWrappingStyle("infront");
+
+      // Position it at the current cursor location approximately
+      // by inserting into a new inline paragraph first to anchor it,
+      // then the infront wrapping lifts it above the text flow
+      var oParagraph = Api.CreateParagraph();
       oParagraph.AddDrawing(oImage);
       oDocument.InsertContent([oParagraph]);
     }, false, false, function(err) {
@@ -103,7 +172,7 @@ function insert() {
     });
 
   }).catch(function(err) {
-    setStatus("Font load failed: " + err.message);
+    setStatus("Failed: " + err.message);
     console.error(err);
   });
 }
