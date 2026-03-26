@@ -27,6 +27,9 @@ button { width: 100%; padding: 6px; cursor: pointer; }
 <button onclick="insert()">Insert</button>
 <div id="status"></div>
 
+<!-- hidden canvas for rendering -->
+<canvas id="renderCanvas" style="display:none;"></canvas>
+
 <script src="pluginCode.js"></script>
 
 <script>
@@ -42,66 +45,82 @@ function insert() {
 
   setStatus("Loading font...");
 
-  // We render the SVG onto a canvas so the font is fully embedded as a PNG image,
-  // which ONLYOFFICE can reliably insert via InsertImage.
-  loadFontAndRender(text, font, fontUrl, function(dataUrl, widthPx, heightPx) {
-    setStatus("Inserting...");
-
-    // InsertImage expects: url, width in mm, height in mm
-    // 1px ~ 0.2646mm at 96dpi
-    var mmW = Math.round(widthPx * 0.2646 * 10) / 10;
-    var mmH = Math.round(heightPx * 0.2646 * 10) / 10;
-
-    window.Asc.plugin.executeMethod("InsertImage", [{
-      "src": dataUrl,
-      "width": mmW,
-      "height": mmH
-    }], function() {
-      setStatus("Done.");
-    });
-  });
-}
-
-function loadFontAndRender(text, fontName, fontUrl, callback) {
-  var fontSize = 32;
-  var padding = 10;
-
-  // Load the font via FontFace API so canvas can use it
-  var face = new FontFace(fontName, "url(" + fontUrl + ")");
+  var face = new FontFace(font, "url(" + fontUrl + ")");
   face.load().then(function(loadedFace) {
     document.fonts.add(loadedFace);
+    setStatus("Rendering...");
 
-    // Measure text width with a temporary canvas
-    var tempCanvas = document.createElement("canvas");
-    var tempCtx = tempCanvas.getContext("2d");
-    tempCtx.font = fontSize + "px \"" + fontName + "\"";
-    var textWidth = tempCtx.measureText(text).width;
+    var fontSize = 32;
+    var padding = 10;
 
-    var canvasWidth = Math.ceil(textWidth) + padding * 2;
-    var canvasHeight = fontSize + padding * 2;
+    // Measure on a temp canvas
+    var temp = document.createElement("canvas");
+    var tempCtx = temp.getContext("2d");
+    tempCtx.font = fontSize + "px \"" + font + "\"";
+    var metrics = tempCtx.measureText(text);
+    var textWidth = metrics.width;
 
-    var canvas = document.createElement("canvas");
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
+    // Use the persistent canvas element
+    var canvas = document.getElementById("renderCanvas");
+    canvas.width  = Math.ceil(textWidth) + padding * 2;
+    canvas.height = fontSize + padding * 2;
     var ctx = canvas.getContext("2d");
 
-    // White background
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-    // Draw text
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#000000";
-    ctx.font = fontSize + "px \"" + fontName + "\"";
+    ctx.font = fontSize + "px \"" + font + "\"";
     ctx.textBaseline = "top";
     ctx.fillText(text, padding, padding);
 
     var dataUrl = canvas.toDataURL("image/png");
-    callback(dataUrl, canvasWidth, canvasHeight);
+
+    // Log so we can verify the data URL is valid
+    console.log("dataUrl length:", dataUrl.length);
+    console.log("dataUrl prefix:", dataUrl.substring(0, 60));
+
+    setStatus("Inserting...");
+
+    // Try method 1: InsertImage with just the data URL string
+    try {
+      window.Asc.plugin.executeMethod("InsertImage", [dataUrl], function(err) {
+        if (err) {
+          console.warn("InsertImage string failed:", err);
+          tryPasteHtml(dataUrl, canvas.width, canvas.height);
+        } else {
+          setStatus("Done.");
+        }
+      });
+    } catch(e) {
+      console.warn("InsertImage threw:", e);
+      tryPasteHtml(dataUrl, canvas.width, canvas.height);
+    }
 
   }).catch(function(err) {
     setStatus("Font load failed: " + err.message);
-    console.error("Font load error:", err);
+    console.error(err);
   });
+}
+
+function tryPasteHtml(dataUrl, w, h) {
+  // Method 2: paste an <img> tag with the embedded PNG data URL
+  // ONLYOFFICE will convert the inline image when pasting HTML
+  var html = '<img src="' + dataUrl + '" width="' + w + '" height="' + h + '">';
+  console.log("Trying PasteHtml with img tag, html length:", html.length);
+  try {
+    window.Asc.plugin.executeMethod("PasteHtml", [html], function(err) {
+      if (err) {
+        console.warn("PasteHtml img failed:", err);
+        setStatus("Insert failed. Check console.");
+      } else {
+        setStatus("Done.");
+      }
+    });
+  } catch(e) {
+    console.error("PasteHtml threw:", e);
+    setStatus("Insert failed. Check console.");
+  }
 }
 </script>
 </body>
