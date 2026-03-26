@@ -29,8 +29,6 @@ button { width: 100%; padding: 6px; cursor: pointer; }
 
 <canvas id="measureCanvas" style="display:none;"></canvas>
 
-<script src="pluginCode.js"></script>
-
 <script>
 // Cache fetched font base64 so we don't re-download on every insert
 var fontCache = {};
@@ -67,8 +65,8 @@ function getFontBase64(fontUrl) {
 function measureTextWidth(text, fontName, fontSize) {
   var canvas = document.getElementById("measureCanvas");
   var ctx = canvas.getContext("2d");
-  // Use a fallback font for measurement — close enough for sizing
-  ctx.font = fontSize + "px serif";
+  // Use a fallback font that's close to the final one – but we only need a rough estimate
+  ctx.font = fontSize + "px 'Times New Roman', serif";
   return ctx.measureText(text).width;
 }
 
@@ -85,20 +83,20 @@ function insert() {
 
     var fontSize = 40;
     var lineHeight = fontSize * 1.3;
-    var paddingX = 6;
-    var paddingY = 6;
+    var paddingX = 12;   // slightly more padding to avoid clipping
+    var paddingY = 12;
 
     // Split text into lines
     var lines = text.split("\n");
     var numLines = lines.length;
 
-    // Rough width estimate using canvas with fallback font
+    // Estimate max width using a fallback font (Times New Roman)
     var maxWidth = 0;
     lines.forEach(function(line) {
       var w = measureTextWidth(line, font, fontSize);
       if (w > maxWidth) maxWidth = w;
     });
-    // Add generous padding since our measurement uses a fallback font
+    // Add extra margin for safety
     var svgWidth  = Math.ceil(maxWidth) + paddingX * 2 + 40;
     var svgHeight = Math.ceil(numLines * lineHeight) + paddingY * 2;
 
@@ -114,23 +112,22 @@ function insert() {
       return '<text x="' + paddingX + '" y="' + y + '">' + safe + '</text>';
     }).join("\n  ");
 
+    // ---- FIX: <style> moved outside <defs> ----
     var svg = [
       '<svg xmlns="http://www.w3.org/2000/svg"',
       '     width="' + svgWidth + '" height="' + svgHeight + '"',
       '     viewBox="0 0 ' + svgWidth + ' ' + svgHeight + '">',
-      '  <defs>',
-      '    <style>',
-      '      @font-face {',
-      '        font-family: "' + font + '";',
-      '        src: url("data:font/truetype;base64,' + fontB64 + '");',
-      '      }',
-      '      text {',
-      '        font-family: "' + font + '", serif;',
-      '        font-size: ' + fontSize + 'px;',
-      '        fill: #000000;',
-      '      }',
-      '    </style>',
-      '  </defs>',
+      '  <style>',
+      '    @font-face {',
+      '      font-family: "' + font + '";',
+      '      src: url("data:font/truetype;base64,' + fontB64 + '");',
+      '    }',
+      '    text {',
+      '      font-family: "' + font + '", "Times New Roman", serif;',
+      '      font-size: ' + fontSize + 'px;',
+      '      fill: #000000;',
+      '    }',
+      '  </style>',
       '  ' + textElements,
       '</svg>'
     ].join("\n");
@@ -156,9 +153,7 @@ function insert() {
       // Set wrapping to "infront" so it floats over text without affecting layout
       oImage.SetWrappingStyle("infront");
 
-      // Position it at the current cursor location approximately
-      // by inserting into a new inline paragraph first to anchor it,
-      // then the infront wrapping lifts it above the text flow
+      // Insert at cursor position
       var oParagraph = Api.CreateParagraph();
       oParagraph.AddDrawing(oImage);
       oDocument.InsertContent([oParagraph]);
