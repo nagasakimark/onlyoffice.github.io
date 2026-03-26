@@ -1,53 +1,43 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF‑8">
-
-<!-- ONLYOFFICE plugin engine (must load first) -->
+<meta charset="UTF-8">
 <script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.js"></script>
 <script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins-ui.js"></script>
 <link rel="stylesheet" href="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.css">
-
 <style>
-/* optional UI styles */
 body { font-family: sans-serif; padding: 8px; }
-textarea { width: 100%; height: 80px; }
+textarea { width: 100%; height: 80px; box-sizing: border-box; }
+select { width: 100%; margin: 6px 0; }
+button { margin-top: 6px; }
 </style>
 </head>
 <body>
-
 <h3>NH Fonts Plugin</h3>
 <textarea id="text">Write here...</textarea>
-
 <select id="font">
   <option value="NH1">NHHandwriting</option>
   <option value="NH2">NHHandwriting RL</option>
   <option value="NH3">NHHandwriting RL TW Light</option>
 </select>
-
 <button onclick="insert()">Insert</button>
 
 <script>
 function insert() {
-  const text = document.getElementById("text").value;
-  const font = document.getElementById("font").value;
-  const svg = `
-<svg xmlns="http://www.w3.org/2000/svg">
-  <style>
-    @font-face {
-      font-family: ${font};
-      src: url("https://nagasakimark.github.io/office/${font==="NH1"?"1.ttf":font==="NH2"?"2.ttf":"3.ttf"}");
-    }
-    text { font-family: ${font}; font-size: 24px; }
-  </style>
-  <text x="10" y="40">${text}</text>
-</svg>`;
+  var text = document.getElementById("text").value;
+  var font = document.getElementById("font").value;
+  var fontFile = font === "NH1" ? "1.ttf" : font === "NH2" ? "2.ttf" : "3.ttf";
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="60">'
+    + '<style>'
+    + '@font-face { font-family: "' + font + '"; src: url("https://nagasakimark.github.io/office/' + fontFile + '"); }'
+    + 'text { font-family: "' + font + '"; font-size: 24px; }'
+    + '</style>'
+    + '<text x="10" y="40">' + text + '</text>'
+    + '</svg>';
   window.Asc.plugin.executeMethod("PasteHtml", [svg]);
 }
 </script>
 
-<!-- your plugin logic -->
 <script src="pluginCode.js"></script>
-
 </body>
 </html>
