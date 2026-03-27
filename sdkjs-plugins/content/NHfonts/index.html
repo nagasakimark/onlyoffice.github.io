@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.js"></script>
+<script type="text/javascript" src="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins-ui.js"></script>
+<link rel="stylesheet" href="https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.css">
+<style>
+* { box-sizing: border-box; }
+html, body { width: 100%; min-height: 100px; margin: 0; padding: 0; }
+body { font-family: sans-serif; padding: 10px; background: #fff; }
+h3 { margin: 0 0 8px 0; font-size: 14px; }
+textarea { width: 100%; height: 80px; margin-bottom: 6px; padding: 4px; }
+select { width: 100%; margin-bottom: 6px; padding: 4px; }
+button { width: 100%; padding: 6px; cursor: pointer; }
+#status { margin-top: 6px; font-size: 12px; color: #666; }
+label { font-size: 12px; display: block; margin-bottom: 2px; }
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  align-items: flex-end;
+}
+.row .field { flex: 1; }
+.row .field label { font-size: 12px; margin-bottom: 2px; }
+.row .field input[type=number] { width: 100%; padding: 4px; }
+
+.color-wrap {
+  position: relative;
+  width: 36px;
+  height: 30px;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+.color-wrap input[type=color] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+}
+</style>
+</head>
+<body>
+<h3>NH Fonts Plugin</h3>
+<textarea id="text">Write here...</textarea>
+
+<label>Font</label>
+<select id="font">
+  <option value="NH1">NHHandwriting</option>
+  <option value="NH2">NHHandwriting RL</option>
+  <option value="NH3">NHHandwriting RL TW Light</option>
+</select>
+
+<div class="row">
+  <div class="field">
+    <label>Font size (px)</label>
+    <input type="number" id="fontSize" value="40" min="8" max="200">
+  </div>
+  <div class="color-wrap" title="Text color">
+    <input type="color" id="textColor" value="#000000">
+  </div>
+</div>
+
+<button onclick="insert()">Insert</button>
+<div id="status"></div>
+
+<script>
+// ---------- helpers ----------
+
+var fontCache = {};
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+  console.log('[NHFonts]', msg);
+}
+
+function fetchFont(url) {
+  if (fontCache[url]) return Promise.resolve(fontCache[url]);
+  return fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error('Font fetch failed: ' + r.status);
+      return r.arrayBuffer();
+    })
+    .then(function(buf) {
+      fontCache[url] = buf;
+      return buf;
+    });
+}
+
+// ---------- core: render text to PNG via canvas ----------
+
+function renderToPng(text, fontFamily, fontBuf, fontSize, textColor) {
+  var SCALE = 3;
+
+  return new Promise(function(resolve, reject) {
+    var face = new FontFace(fontFamily, fontBuf);
+    face.load().then(function(loadedFace) {
+      document.fonts.add(loadedFace);
+
+      var physicalFontSize = fontSize * SCALE;
+      var lineHeight = Math.round(physicalFontSize * 1.4);
+      var paddingX   = Math.round(physicalFontSize * 0.3);
+      var paddingY   = Math.round(physicalFontSize * 0.3);
+      var lines      = text.split('\n');
+
+      var tmp = document.createElement('canvas');
+      var tmpCtx = tmp.getContext('2d');
+      tmpCtx.font = physicalFontSize + 'px "' + fontFamily + '"';
+
+      var maxW = 0;
+      lines.forEach(function(line) {
+        var w = tmpCtx.measureText(line || ' ').width;
+        if (w > maxW) maxW = w;
+      });
+
+      var physicalW = Math.ceil(maxW)           + paddingX * 2;
+      var physicalH = lines.length * lineHeight + paddingY * 2;
+
+      var logicalW = Math.round(physicalW / SCALE);
+      var logicalH = Math.round(physicalH / SCALE);
+
+      var canvas = document.createElement('canvas');
+      canvas.width  = physicalW;
+      canvas.height = physicalH;
+      var ctx = canvas.getContext('2d');
+
+      // Fully transparent background — canvas is already transparent by default,
+      // so we just skip any fillRect and draw text directly.
+      ctx.font         = physicalFontSize + 'px "' + fontFamily + '"';
+      ctx.fillStyle    = textColor;
+      ctx.textBaseline = 'alphabetic';
+
+      lines.forEach(function(line, i) {
+        ctx.fillText(line, paddingX, paddingY + physicalFontSize + i * lineHeight);
+      });
+
+      resolve({
+        dataUrl: canvas.toDataURL('image/png'),
+        width:   logicalW,
+        height:  logicalH
+      });
+    }).catch(reject);
+  });
+}
+
+// ---------- insert ----------
+
+function insert() {
+  var text      = document.getElementById('text').value;
+  var fontKey   = document.getElementById('font').value;
+  var fontSize  = parseInt(document.getElementById('fontSize').value, 10) || 40;
+  var textColor = document.getElementById('textColor').value;
+
+  var fileMap = { NH1: '1.ttf', NH2: '2.ttf', NH3: '3.ttf' };
+  var fontUrl    = 'https://nagasakimark.github.io/office/' + fileMap[fontKey];
+  var fontFamily = fontKey + '_nhplugin';
+
+  setStatus('Loading font...');
+
+  fetchFont(fontUrl)
+    .then(function(fontBuf) {
+      setStatus('Rendering text...');
+      return renderToPng(text, fontFamily, fontBuf, fontSize, textColor);
+    })
+    .then(function(result) {
+      setStatus('Inserting...');
+
+      var emuW = Math.round(result.width  * 9525);
+      var emuH = Math.round(result.height * 9525);
+
+      Asc.scope.imgSrc     = result.dataUrl;
+      Asc.scope.emuW       = emuW;
+      Asc.scope.emuH       = emuH;
+      Asc.scope.editorType = window.Asc.plugin.info.editorType;
+
+      window.Asc.plugin.callCommand(function() {
+        var imgSrc = Asc.scope.imgSrc;
+        var emuW   = Asc.scope.emuW;
+        var emuH   = Asc.scope.emuH;
+        var editor = Asc.scope.editorType;
+
+        var oImage = Api.CreateImage(imgSrc, emuW, emuH);
+
+        if (editor === 'slide') {
+          var oPresentation = Api.GetPresentation();
+          var nSlide = oPresentation.GetCurSlideIndex();
+          var oSlide = oPresentation.GetSlideByIndex(nSlide);
+          oImage.SetPosition(36000 * 10, 36000 * 10);
+          oImage.SetSize(emuW, emuH);
+          oSlide.AddObject(oImage);
+        } else {
+          var oDocument  = Api.GetDocument();
+          var oParagraph = Api.CreateParagraph();
+          oParagraph.AddDrawing(oImage);
+          oDocument.InsertContent([oParagraph]);
+        }
+      }, false, true, function(err) {
+        if (err) {
+          console.error('[NHFonts] callCommand error:', err);
+          setStatus('Error: ' + JSON.stringify(err));
+        } else {
+          setStatus('Done.');
+        }
+      });
+    })
+    .catch(function(err) {
+      console.error('[NHFonts]', err);
+      setStatus('Failed: ' + err.message);
+    });
+}
+</script>
+</body>
+</html>
